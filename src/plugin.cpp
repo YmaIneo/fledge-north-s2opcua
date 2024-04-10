@@ -43,6 +43,9 @@ extern "C" {
  * - plugin_register
  */
 
+#define STRINGIFY(x) #x
+#define STRINGIFY_MACRO(x) STRINGIFY(x)
+
 namespace {
 #define PLUGIN_NAME  "s2opcua"      // //NOSONAR interpreted in macros
 #define INTERFACE_VERSION  "1.0.0"  // //NOSONAR interpreted in macros
@@ -97,7 +100,9 @@ PLUGIN_HANDLE plugin_init(ConfigCategory *configData) {
     // the very first thing to do is to configure ASSERTs to be routed to Logger
     SOPC_Assert_Set_UserCallback(&plugin_Assert_UserCallback);
     try {
-        Logger::getLogger()->setMinLevel("debug");
+        #ifdef START_LOG_LEVEL
+        Logger::getLogger()->setMinLevel(STRINGIFY_MACRO(START_LOG_LEVEL));
+        #endif
         INFO("----------------------------");
         DEBUG("OPC UA Server plugin_init()");
         handle = (PLUGIN_HANDLE)

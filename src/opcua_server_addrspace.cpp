@@ -7,6 +7,7 @@
  *
  * Author: Jeremie Chabod
  */
+#include <rapidjson/error/en.h>
 
 #include "opcua_server_addrspace.h"
 
@@ -201,49 +202,51 @@ CNode::
 /**************************************************************************/
 void
 CNode::
-createReverseRef(NodeVect_t* nodes, const OpcUa_ReferenceNode& ref)const {
+createReverseRef(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup, const OpcUa_ReferenceNode& ref)const {
     // create a reverse reference
     const SOPC_NodeId& refTargetId(ref.TargetId.NodeId);
-//    DEBUG("Create reverse reference from '%s' to '%s'",
-//            toString(*mNodeId.get()).c_str(), toString(refTargetId).c_str());
+    // DEBUG("Create reverse reference from '%s' to '%s'",
+    //        toString(*mNodeId.get()).c_str(), toString(refTargetId).c_str());
     // Find matching node in 'nodes'
-    bool found(false);
-    for (const NodeInfo_t& loopInfo : *nodes) {
+    std::string nodeUuid = CNode::buildNodeUuid(refTargetId);
+    if (nodesLookup->count(nodeUuid)) {
+        const NodeInfo_t& loopInfo = (*nodes)[(*nodesLookup)[nodeUuid]];
         SOPC_AddressSpace_Node* pNode(loopInfo.mNode);
         const SOPC_NodeId* nodeId = ::getNodeIdFromAddrSpace(*pNode);
-        if (nodeId != nullptr && !found && SOPC_NodeId_Equal(nodeId, &refTargetId)) {
-            // Insert space in target references
-            found = true;
-            // Initial setup provides RO-Mem allocation. Thus deallocation shall only be done for
-            // elements explicitly allocated here
-            const size_t oldSize(pNode->data.variable.NoOfReferences);
-            const size_t newSize(oldSize + 1);
-            referencesGarbageCollector.reallocate(&pNode->data.variable.References,
-                    oldSize, newSize);
+        // Insert space in target references
+        // Initial setup provides RO-Mem allocation. Thus deallocation shall only be done for
+        // elements explicitly allocated here
+        const size_t oldSize(pNode->data.variable.NoOfReferences);
+        const size_t newSize(oldSize + 1);
+        referencesGarbageCollector.reallocate(&pNode->data.variable.References,
+                oldSize, newSize);
 
-            // Fill new reference with inverted reference
-            OpcUa_ReferenceNode& reverse(pNode->data.variable.References[oldSize]);
-            reverse.IsInverse = !ref.IsInverse;
-            reverse.ReferenceTypeId = ref.ReferenceTypeId;
-//            DEBUG("Create rev ref from '%s' to '%s'",
-//                   SOPC_tools::toString(*mNodeId.get()).c_str(),
-//                   SOPC_tools::toString(*nodeId).c_str());
-            SOPC_NodeId_Copy(&reverse.TargetId.NodeId, mNodeId.get());
-            reverse.TargetId.ServerIndex = serverIndex;
-            reverse.TargetId.NamespaceUri = String_NULL;
+        // Fill new reference with inverted reference
+        OpcUa_ReferenceNode& reverse(pNode->data.variable.References[oldSize]);
+        reverse.IsInverse = !ref.IsInverse;
+        reverse.ReferenceTypeId = ref.ReferenceTypeId;
+        // DEBUG("Create rev ref from '%s' to '%s'",
+        //         SOPC_tools::toString(*mNodeId.get()).c_str(),
+        //         SOPC_tools::toString(*nodeId).c_str());
+        SOPC_NodeId_Copy(&reverse.TargetId.NodeId, mNodeId.get());
+        reverse.TargetId.ServerIndex = serverIndex;
+        reverse.TargetId.NamespaceUri = String_NULL;
 
-            pNode->data.variable.NoOfReferences = static_cast<uint32_t>(newSize);
-        }
+        pNode->data.variable.NoOfReferences = static_cast<uint32_t>(newSize);
     }
 }
 
 /**************************************************************************/
 void
 CNode::
-insertAndCompleteReferences(NodeVect_t* nodes,
+insertAndCompleteReferences(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup,
         NodeMap_t* nodeMap , const NodeInfoCtx_t& context) {
     NodeInfo_t refInfo(&mNode, context);
     nodes->push_back(refInfo);
+    std::string nodeUuid = CNode::buildNodeUuid(refInfo);
+    if (!nodeUuid.empty()) {
+        nodesLookup->emplace(nodeUuid, nodes->size()-1);
+    }
     if (nodeMap != nullptr) {
         const string name(toString(*mNodeId.get()));
         DEBUG("Create Node '%s' to '%s'", LOGGABLE(name), LOGGABLE(refInfo.mContext.mPivotId));
@@ -255,9 +258,35 @@ insertAndCompleteReferences(NodeVect_t* nodes,
     for (uint32_t i = 0 ; i < nbRef; i++) {
         const OpcUa_ReferenceNode& ref(mNode.data.variable.References[i]);
         if (ref.TargetId.ServerIndex == serverIndex) {
-            createReverseRef(nodes, ref);
+            createReverseRef(nodes, nodesLookup, ref);
         }
     }
+}
+
+
+
+/**************************************************************************/
+std::string
+CNode::
+buildNodeUuid(const NodeInfo_t& nodeInfo) {
+    SOPC_AddressSpace_Node* pNode(nodeInfo.mNode);
+    if (pNode == nullptr) {
+        return "";
+    }
+    const SOPC_NodeId* nodeId = ::getNodeIdFromAddrSpace(*pNode);
+    if (nodeId == nullptr) {
+        return "";
+    }
+    return CNode::buildNodeUuid(*nodeId);
+}
+
+/**************************************************************************/
+std::string
+CNode::
+buildNodeUuid(const SOPC_NodeId& nodeId) {
+    uint64_t hash = 0;
+    SOPC_NodeId_Hash(&nodeId, &hash);
+    return  std::to_string(hash);
 }
 
 /**************************************************************************/
@@ -379,7 +408,7 @@ createFolderNode(const string& nodeId, const SOPC_NodeId& parent) {
     CNode* pNode(new CFolderNode(nodeId, parent));
     DEBUG("Adding node object '%s' under '%s'",
             toString(pNode->nodeId()).c_str(), SOPC_tools::toString(parent).c_str());
-    pNode->insertAndCompleteReferences(&mNodes);
+    pNode->insertAndCompleteReferences(&mNodes, &mNodesLookup);
     return pNode;
 }
 
@@ -395,7 +424,7 @@ insertUnrefVarNode(const NodeInsertRef& ref,
     CVarNode* pNode(new CVarNode(cVarInfo, type));   // //NOSONAR (deletion managed by S2OPC)
     DEBUG("Adding node data '%s' of type '%d' (%s)", SOPC_tools::toString(pNode->nodeId()).c_str(), type,
             (isReadOnly ? "RO" : "RW"));
-    pNode->insertAndCompleteReferences(&mNodes, & mByNodeId, context);
+    pNode->insertAndCompleteReferences(&mNodes, &mNodesLookup, &mByNodeId, context);
 }
 
 /**************************************************************************/
@@ -450,14 +479,18 @@ Server_AddrSpace::
 Server_AddrSpace(const std::string& json) {
     using rapidjson::Value;
     mNodes = getNS0();
+    initNodesLookup();
+    DEBUG("Initialized getNS0 with %d nodes", mNodes.size());
 
     /* "nodes" are initially set-up with namespace 0 default nodes.
      Now this will be completed with configuration-extracted data
      */
     rapidjson::Document doc;
     doc.Parse(json.c_str());
-    ASSERT(!doc.HasParseError() && doc.HasMember(JSON_EXCHANGED_DATA),
-            "Malformed JSON (section '%s', index = %u)", JSON_EXCHANGED_DATA, doc.GetErrorOffset());
+    ASSERT(!doc.HasParseError(), "Configuration parse error: %s at %d in '%s'",
+                                    GetParseError_En(doc.GetParseError()), static_cast<unsigned>(doc.GetErrorOffset()), json.c_str());
+   
+    ASSERT(doc.HasMember(JSON_EXCHANGED_DATA), "Malformed JSON (section '%s', index = %u)", JSON_EXCHANGED_DATA, doc.GetErrorOffset());
 
     const Value& exData(::getObject(doc, JSON_EXCHANGED_DATA, JSON_EXCHANGED_DATA));
     const Value::ConstArray datapoints(getArray(exData, JSON_DATAPOINTS, JSON_EXCHANGED_DATA));
@@ -474,10 +507,23 @@ Server_AddrSpace(const std::string& json) {
 
                 // Create a parent node of type Folder
                 createPivotNodes(pivot_id, data.address, data.typeId);
+                // Exit after protocol found
+                break;
             }
             catch (const ExchangedDataC::NotAnS2opcInstance&) {
                 // Just ignore other protocols
             }
+        }
+    }
+}
+
+/**************************************************************************/
+void Server_AddrSpace::
+initNodesLookup() {
+    for(int i=1 ; i<mNodes.size() ; i++) {
+        std::string nodeUuid = CNode::buildNodeUuid(mNodes[i]);
+        if (!nodeUuid.empty()) {
+            mNodesLookup.emplace(nodeUuid, i);
         }
     }
 }

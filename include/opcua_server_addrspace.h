@@ -84,6 +84,8 @@ using NodeVect_t = std::vector<NodeInfo_t>;
 using NodeMap_t = std::unordered_map<string, NodeInfo_t>;
 /** NodeIdMap_t = {PivotId : Pivot address} */
 using NodeIdMap_t = std::unordered_map<string, string>;
+/** NodeLookupMap_t = <NodeId, index in NodeVect_t> */
+using NodeLookupMap_t = std::unordered_map<string, int>;
 
 struct ControlInfo {
     const NodeInfo_t* mTrigger;
@@ -126,15 +128,17 @@ class CNode {
  public:
     inline SOPC_AddressSpace_Node* get(void) {return &mNode;}
     inline const SOPC_NodeId& nodeId(void)const {return *mNodeId.get();}
-    void insertAndCompleteReferences(NodeVect_t* nodes,
+    void insertAndCompleteReferences(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup,
             NodeMap_t* nodeMap = nullptr, const NodeInfoCtx_t& context = NodeInfoCtx_empty);
+    static std::string buildNodeUuid(const NodeInfo_t& nodeInfo);
+    static std::string buildNodeUuid(const SOPC_NodeId& nodeId);
 
  protected:
     explicit CNode(const string& nodeName, OpcUa_NodeClass nodeClass, SOPC_StatusCode defaultStatusCode = GoodStatus);
     virtual ~CNode(void);  // //NOSONAR S2OPC API.
 
  private:
-    void createReverseRef(NodeVect_t* nodes, const OpcUa_ReferenceNode& ref)const;
+    void createReverseRef(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup, const OpcUa_ReferenceNode& ref) const;
 
     SOPC_AddressSpace_Node mNode;
     std::unique_ptr<SOPC_NodeId> mNodeId;
@@ -204,7 +208,6 @@ class Server_AddrSpace{
 
  public:
     inline const NodeVect_t& getNodes(void)const {return mNodes;}
-    inline NodeVect_t& getNodes(void) {return mNodes;}
 
  private:
     /**
@@ -231,12 +234,17 @@ class Server_AddrSpace{
     inline const NodeInfo_t* getNodeInfo(const string& addr, const string& subNode)const {
         return getByNodeId(getNodeIdName(addr + "/" + subNode));
     }
+    void initNodesLookup();
 
     /**
      * The content of the address space.
      */
     NodeVect_t mNodes;
     // Note: nodes are freed automatically (See call to ::SOPC_AddressSpace_Create)
+    /**
+     * Lookup table used to access nodes from mNodes in O(1)
+     */
+    NodeLookupMap_t mNodesLookup;
 
     /**
      * Map containing functional nodes which can be written by clients
