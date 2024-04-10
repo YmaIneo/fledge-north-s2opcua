@@ -208,7 +208,7 @@ createReverseRef(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup, const OpcUa_Re
     // DEBUG("Create reverse reference from '%s' to '%s'",
     //        toString(*mNodeId.get()).c_str(), toString(refTargetId).c_str());
     // Find matching node in 'nodes'
-    std::string nodeUuid = CNode::buildNodeUuid(refTargetId);
+    uint64_t nodeUuid = CNode::buildNodeUuid(refTargetId);
     if (nodesLookup->count(nodeUuid)) {
         const NodeInfo_t& loopInfo = (*nodes)[(*nodesLookup)[nodeUuid]];
         SOPC_AddressSpace_Node* pNode(loopInfo.mNode);
@@ -243,8 +243,8 @@ insertAndCompleteReferences(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup,
         NodeMap_t* nodeMap , const NodeInfoCtx_t& context) {
     NodeInfo_t refInfo(&mNode, context);
     nodes->push_back(refInfo);
-    std::string nodeUuid = CNode::buildNodeUuid(refInfo);
-    if (!nodeUuid.empty()) {
+    uint64_t nodeUuid = CNode::buildNodeUuid(refInfo);
+    if (nodeUuid != 0) {
         nodesLookup->emplace(nodeUuid, nodes->size()-1);
     }
     if (nodeMap != nullptr) {
@@ -266,27 +266,27 @@ insertAndCompleteReferences(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup,
 
 
 /**************************************************************************/
-std::string
+uint64_t
 CNode::
 buildNodeUuid(const NodeInfo_t& nodeInfo) {
     SOPC_AddressSpace_Node* pNode(nodeInfo.mNode);
     if (pNode == nullptr) {
-        return "";
+        return 0;
     }
     const SOPC_NodeId* nodeId = ::getNodeIdFromAddrSpace(*pNode);
     if (nodeId == nullptr) {
-        return "";
+        return 0;
     }
     return CNode::buildNodeUuid(*nodeId);
 }
 
 /**************************************************************************/
-std::string
+uint64_t
 CNode::
 buildNodeUuid(const SOPC_NodeId& nodeId) {
     uint64_t hash = 0;
     SOPC_NodeId_Hash(&nodeId, &hash);
-    return  std::to_string(hash);
+    return hash;
 }
 
 /**************************************************************************/
@@ -521,8 +521,8 @@ Server_AddrSpace(const std::string& json) {
 void Server_AddrSpace::
 initNodesLookup() {
     for(int i=1 ; i<mNodes.size() ; i++) {
-        std::string nodeUuid = CNode::buildNodeUuid(mNodes[i]);
-        if (!nodeUuid.empty()) {
+        uint64_t nodeUuid = CNode::buildNodeUuid(mNodes[i]);
+        if (nodeUuid != 0) {
             mNodesLookup.emplace(nodeUuid, i);
         }
     }

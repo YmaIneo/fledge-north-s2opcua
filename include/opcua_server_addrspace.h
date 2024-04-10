@@ -85,7 +85,7 @@ using NodeMap_t = std::unordered_map<string, NodeInfo_t>;
 /** NodeIdMap_t = {PivotId : Pivot address} */
 using NodeIdMap_t = std::unordered_map<string, string>;
 /** NodeLookupMap_t = <NodeId, index in NodeVect_t> */
-using NodeLookupMap_t = std::unordered_map<string, int>;
+using NodeLookupMap_t = std::unordered_map<uint64_t, int>;
 
 struct ControlInfo {
     const NodeInfo_t* mTrigger;
@@ -130,8 +130,8 @@ class CNode {
     inline const SOPC_NodeId& nodeId(void)const {return *mNodeId.get();}
     void insertAndCompleteReferences(NodeVect_t* nodes, NodeLookupMap_t* nodesLookup,
             NodeMap_t* nodeMap = nullptr, const NodeInfoCtx_t& context = NodeInfoCtx_empty);
-    static std::string buildNodeUuid(const NodeInfo_t& nodeInfo);
-    static std::string buildNodeUuid(const SOPC_NodeId& nodeId);
+    static uint64_t buildNodeUuid(const NodeInfo_t& nodeInfo);
+    static uint64_t buildNodeUuid(const SOPC_NodeId& nodeId);
 
  protected:
     explicit CNode(const string& nodeName, OpcUa_NodeClass nodeClass, SOPC_StatusCode defaultStatusCode = GoodStatus);
